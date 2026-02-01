@@ -82,6 +82,32 @@ public class ConvexClient {
     .eraseToAnyPublisher()
   }
 
+  /// Executes the query with the given `name` and `args` without returning a result.
+  ///
+  /// For queries that return a value, prefer calling the version of this method that returns a ``Decodable`` value.
+  ///
+  /// - Parameters:
+  ///   - name: A value in "module:mutation_name"  format that will be used when calling the backend
+  ///   - args: An optional ``Dictionary`` of arguments to be sent to the backend mutation function
+  public func query<T: Decodable>(_ name: String, with args: [String: ConvexEncodable?]? = nil)
+    async throws -> T
+  {
+    try await callForResult(name: name, args: args, remoteCall: ffiClient.query)
+  }
+
+  /// Executes the query with the given `name` and `args` without returning a result.
+  ///
+  /// For queries that return a value, prefer calling the version of this method that returns a ``Decodable`` value.
+  ///
+  /// - Parameters:
+  ///   - name: A value in "module:mutation_name"  format that will be used when calling the backend
+  ///   - args: An optional ``Dictionary`` of arguments to be sent to the backend mutation function
+  public func query(_ name: String, with args: [String: ConvexEncodable?]? = nil)
+    async throws
+  {
+    let _: String? = try await query(name, with: args)
+  }
+
   /// Executes the mutation with the given `name` and `args` and returns the result.
   ///
   /// For mutations that don't return a value, prefer calling the version of this method that doesn't return a value.
