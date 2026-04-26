@@ -397,8 +397,7 @@ final class ConvexMobileTests: XCTestCase {
     XCTAssertEqual(fakeAuthProvider.loginFromCacheCallCount, callCountAfterLogin + 1)
   }
 
-  func testTokenRefreshUpdatesAuthCallback() async throws {
-    let expectation = self.expectation(description: "setAuthCallbackCalled")
+  func testTokenRefreshUpdatesCachedTokenWithoutResettingAuthCallback() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let fakeAuthProvider = FakeAuthProvider()
     let client = ConvexMobile.ConvexClientWithAuth(
@@ -409,19 +408,26 @@ final class ConvexMobileTests: XCTestCase {
     XCTAssertEqual(try result.get(), FakeAuthProvider.CREDENTIALS)
     let initialToken = try await fakeFfiClient.authProvider?.fetchToken(forceRefresh: false)
     XCTAssertEqual(initialToken, "extracted: \(FakeAuthProvider.CREDENTIALS)")
+    let initialAuthProvider = fakeFfiClient.authProvider
 
-    // Set up expectation for the next setAuthCallback call
-    fakeFfiClient.setAuthCallbackExpectation = expectation
+    // A pushed token refresh should update the bridge's cached token without
+    // re-registering the auth callback. Re-registering can cause the Rust client
+    // to immediately pull another token and create refresh loops with providers
+    // that emit token refresh events while servicing force refresh requests.
+    fakeFfiClient.setAuthCallbackExpectation = self.expectation(
+      description: "setAuthCallback should not be called")
+    fakeFfiClient.setAuthCallbackExpectation?.isInverted = true
 
     // Simulate a token refresh by invoking the stored callback with a new token
     let refreshedToken = "refreshed_token_value"
     fakeAuthProvider.simulateTokenRefresh(newToken: refreshedToken)
 
-    await fulfillment(of: [expectation], timeout: 10)
+    await fulfillment(of: [fakeFfiClient.setAuthCallbackExpectation!], timeout: 0.2)
 
     // The provider's cached token should now be the refreshed token
     let updatedToken = try await fakeFfiClient.authProvider?.fetchToken(forceRefresh: false)
     XCTAssertEqual(updatedToken, refreshedToken)
+    XCTAssertTrue(fakeFfiClient.authProvider === initialAuthProvider)
   }
 
   func testTokenRefreshWithNilSetsAuthStateToUnauthenticated() async throws {

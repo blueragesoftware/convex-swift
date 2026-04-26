@@ -335,9 +335,6 @@ public class ConvexClientWithAuth<T>: ConvexClient {
         do {
           if let token {
             await self?.authBridge?.updateToken(token)
-            if let bridge = self?.authBridge {
-              try await ffiClient.setAuthCallback(provider: bridge)
-            }
           } else {
             self?.authBridge = nil
             try await ffiClient.setAuthCallback(provider: nil)
