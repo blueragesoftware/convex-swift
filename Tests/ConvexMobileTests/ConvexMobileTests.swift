@@ -1,475 +1,356 @@
-import XCTest
+import Foundation
+import Testing
 
 @testable import ConvexMobile
 @testable import UniFFI
 
-final class ConvexMobileTests: XCTestCase {
-  func testSubscribeResult() async throws {
-    let expectation = self.expectation(description: "subscribe")
-    var error: ClientError?
-    var result: Message?
+@Suite("Convex mobile client", .serialized)
+struct ConvexMobileTests {
+  @Test func subscribeResult() async throws {
     let client = ConvexMobile.ConvexClient(ffiClient: FakeMobileConvexClient())
 
-    let cancellationHandle = client.subscribe(to: "foo").sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .finished:
-          break
-        case .failure(let clientError):
-          error = clientError
-          break
-        }
-      },
-      receiveValue: { (value: Message) in
-        result = value
-        expectation.fulfill()
-      })
+    let result: Message = try await firstValue(from: client.stream(to: "foo"))
 
-    await fulfillment(of: [expectation], timeout: 10)
-
-    XCTAssertEqual(result!.id, "the_id")
-    XCTAssertEqual(result!.val, 42)
-    XCTAssertNil(error)
+    #expect(result.id == "the_id")
+    #expect(result.val == 42)
   }
 
-  func testSubscribeCanTrimDupeVals() async throws {
-    let receivedSomething = self.expectation(description: "subscribe")
-    let donePublishing = self.expectation(description: "done_publishing")
-    var error: ClientError?
-    var result: [Message] = []
+  @Test func subscribeCanTrimDupeVals() async throws {
+    let published = AsyncStream<Void>.makeStream()
     let client = ConvexMobile.ConvexClient(
-      ffiClient: FakeMobileConvexClient(resultPublished: donePublishing))
+      ffiClient: FakeMobileConvexClient(resultPublished: published.continuation))
 
-    let cancellationHandle = client.subscribe(to: "dupeVals")
-      .removeDuplicates()
-      .sink(
-        receiveCompletion: { completion in
-          switch completion {
-          case .finished:
-            break
-          case .failure(let clientError):
-            error = clientError
-            break
-          }
-        },
-        receiveValue: { (value: Message) in
-          result.append(value)
-          if result.count == 1 {
-            receivedSomething.fulfill()
-          }
-        })
+    let streamTask = Task { () throws -> [Message] in
+      var previousValue: Message?
+      var result: [Message] = []
+      for try await value in client.stream(to: "dupeVals", yielding: Message.self) {
+        guard value != previousValue else {
+          continue
+        }
 
-    await fulfillment(of: [donePublishing, receivedSomething], timeout: 10)
+        previousValue = value
+        result.append(value)
+        if result.count == 1 {
+          return result
+        }
+      }
+      return result
+    }
 
-    XCTAssertEqual(result.count, 1)
-    XCTAssertNil(error)
+    _ = try await firstValue(from: published.stream)
+    let result = try await streamTask.value
+
+    #expect(result.count == 1)
   }
 
-  func testSubscribeOptionalResultWithPresentVal() async throws {
-    let expectation = self.expectation(description: "subscribe")
-    var error: ClientError?
-    var result: MessageWithOptionalVal?
+  @Test func subscribeOptionalResultWithPresentVal() async throws {
     let client = ConvexMobile.ConvexClient(ffiClient: FakeMobileConvexClient())
 
-    let cancellationHandle = client.subscribe(to: "foo").sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .finished:
-          break
-        case .failure(let clientError):
-          error = clientError
-          break
-        }
-      },
-      receiveValue: { (value: MessageWithOptionalVal?) in
-        result = value
-        expectation.fulfill()
-      })
+    let result: MessageWithOptionalVal? = try await firstValue(from: client.stream(to: "foo"))
+    let value = try #require(result)
 
-    await fulfillment(of: [expectation], timeout: 10)
-
-    XCTAssertEqual(result!.id, "the_id")
-    XCTAssertEqual(result!.val, 42)
-    XCTAssertNil(error)
+    #expect(value.id == "the_id")
+    #expect(value.val == 42)
   }
 
-  func testSubscribeOptionalResultWithNullVal() async throws {
-    let expectation = self.expectation(description: "subscribe")
-    var error: ClientError?
-    var result: MessageWithOptionalVal?
+  @Test func subscribeOptionalResultWithNullVal() async throws {
     let client = ConvexMobile.ConvexClient(ffiClient: FakeMobileConvexClient())
 
-    let cancellationHandle = client.subscribe(to: "nullVal").sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .finished:
-          break
-        case .failure(let clientError):
-          error = clientError
-          break
-        }
-      },
-      receiveValue: { (value: MessageWithOptionalVal?) in
-        result = value
-        expectation.fulfill()
-      })
+    let result: MessageWithOptionalVal? = try await firstValue(from: client.stream(to: "nullVal"))
+    let value = try #require(result)
 
-    await fulfillment(of: [expectation], timeout: 10)
-
-    XCTAssertEqual(result!.id, "the_id")
-    XCTAssertEqual(result!.val, nil)
-    XCTAssertNil(error)
+    #expect(value.id == "the_id")
+    #expect(value.val == nil)
   }
 
-  func testSubscribeOptionalResultWithMissingVal() async throws {
-    let expectation = self.expectation(description: "subscribe")
-    var error: ClientError?
-    var result: MessageWithOptionalVal?
+  @Test func subscribeOptionalResultWithMissingVal() async throws {
     let client = ConvexMobile.ConvexClient(ffiClient: FakeMobileConvexClient())
 
-    let cancellationHandle = client.subscribe(to: "missingVal").sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .finished:
-          break
-        case .failure(let clientError):
-          error = clientError
-          break
-        }
-      },
-      receiveValue: { (value: MessageWithOptionalVal?) in
-        result = value
-        expectation.fulfill()
-      })
+    let result: MessageWithOptionalVal? = try await firstValue(from: client.stream(to: "missingVal"))
+    let value = try #require(result)
 
-    await fulfillment(of: [expectation], timeout: 10)
-
-    XCTAssertEqual(result!.id, "the_id")
-    XCTAssertEqual(result!.val, nil)
-    XCTAssertNil(error)
+    #expect(value.id == "the_id")
+    #expect(value.val == nil)
   }
 
-  func testMissingSubscribeArgs() async throws {
-    let expectation = self.expectation(description: "subscribe")
+  @Test func missingSubscribeArgs() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClient(ffiClient: fakeFfiClient)
 
-    let cancellationHandle = try client.subscribe(to: "foo").sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .finished:
-          break
-        case .failure:
-          break
-        }
-      },
-      receiveValue: { (value: Message) in
-        expectation.fulfill()
-      })
+    let _: Message = try await firstValue(from: client.stream(to: "foo"))
 
-    await fulfillment(of: [expectation], timeout: 10)
-
-    XCTAssertEqual(fakeFfiClient.subscriptionArgs, [:])
+    #expect(fakeFfiClient.subscriptionArgs == [:])
   }
 
-  func testPopulatedSubscribeArgs() async throws {
-    let expectation = self.expectation(description: "subscribe")
+  @Test func populatedSubscribeArgs() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClient(ffiClient: fakeFfiClient)
 
-    let cancellationHandle = client.subscribe(
+    let _: Message = try await firstValue(from: client.stream(
       to: "foo",
       with: [
         "aString": "bar", "aDouble": 42.0, "anInt": 42, "aNil": nil,
         "aDict": ["sub1": 1.0, "nested": ["ohmy": true]], "aList": [true, false, true, nil],
       ]
-    ).sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .finished:
-          break
-        case .failure:
-          break
-        }
-      }) {
-        (value: Message) in
-        expectation.fulfill()
-      }
+    ))
 
-    await fulfillment(of: [expectation], timeout: 10)
-
-    XCTAssertEqual(fakeFfiClient.subscriptionArgs["aString"], "\"bar\"")
-    XCTAssertEqual(fakeFfiClient.subscriptionArgs["aDouble"], "42")
-    XCTAssertEqual(fakeFfiClient.subscriptionArgs["anInt"], "{\"$integer\":\"KgAAAAAAAAA=\"}")
-    XCTAssertEqual(fakeFfiClient.subscriptionArgs["aNil"], "null")
-    XCTAssertEqual(
-      fakeFfiClient.subscriptionArgs["aDict"], "{\"nested\":{\"ohmy\":true},\"sub1\":1}")
-    XCTAssertEqual(fakeFfiClient.subscriptionArgs["aList"], "[true,false,true,null]")
-
+    #expect(fakeFfiClient.subscriptionArgs["aString"] == "\"bar\"")
+    #expect(fakeFfiClient.subscriptionArgs["aDouble"] == "42")
+    #expect(fakeFfiClient.subscriptionArgs["anInt"] == "{\"$integer\":\"KgAAAAAAAAA=\"}")
+    #expect(fakeFfiClient.subscriptionArgs["aNil"] == "null")
+    #expect(fakeFfiClient.subscriptionArgs["aDict"] == "{\"nested\":{\"ohmy\":true},\"sub1\":1}")
+    #expect(fakeFfiClient.subscriptionArgs["aList"] == "[true,false,true,null]")
   }
 
-  func testSubscribeCancellation() async throws {
-    let expectation = self.expectation(description: "subscribe")
-    var error: ClientError?
+  @Test func subscribeCancellation() async throws {
+    let receivedValue = AsyncStream<Void>.makeStream()
     let ffiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClient(ffiClient: ffiClient)
 
-    let cancellationHandle = client.subscribe(to: "foo").sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .finished:
-          break
-        case .failure(let clientError):
-          error = clientError
-          break
-        }
-      },
-      receiveValue: { (value: Message) in
-        expectation.fulfill()
-      })
+    let streamTask = Task {
+      for try await _: Message in client.stream(to: "foo") {
+        receivedValue.continuation.yield()
+        receivedValue.continuation.finish()
+      }
+    }
 
-    await fulfillment(of: [expectation], timeout: 10)
-    cancellationHandle.cancel()
+    _ = try await firstValue(from: receivedValue.stream)
+    streamTask.cancel()
+    _ = await streamTask.result
 
-    XCTAssertEqual(ffiClient.cancellationCount, 1)
-    XCTAssertNil(error)
+    #expect(ffiClient.cancellationCount == 1)
   }
 
-  func testMutationRoundTrip() async throws {
+  @Test func queryRoundTrip() async throws {
+    let fakeFfiClient = FakeMobileConvexClient()
+    let client = ConvexMobile.ConvexClient(ffiClient: fakeFfiClient)
+
+    let message: Message = try await client.query("foo", with: ["anInt": 303])
+
+    #expect(message.id == "the_id")
+    #expect(message.val == 303)
+  }
+
+  @Test func mutationRoundTrip() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClient(ffiClient: fakeFfiClient)
 
     let message: Message = try await client.mutation("foo", with: ["anInt": 101])
 
-    XCTAssertEqual(message.id, "the_id")
-    XCTAssertEqual(message.val, 101)
+    #expect(message.id == "the_id")
+    #expect(message.val == 101)
   }
 
-  func testVoidMutation() async throws {
+  @Test func voidMutation() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClient(ffiClient: fakeFfiClient)
 
-    try await client.mutation("nullResult")
+    let _: String? = try await client.mutation("nullResult")
 
-    XCTAssertEqual(fakeFfiClient.mutationCalls, ["nullResult"])
+    #expect(fakeFfiClient.mutationCalls == ["nullResult"])
   }
 
-  func testActionRoundTrip() async throws {
+  @Test func actionRoundTrip() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClient(ffiClient: fakeFfiClient)
 
     let message: Message = try await client.action("foo", with: ["anInt": Int.max])
 
-    XCTAssertEqual(message.id, "the_id")
-    XCTAssertEqual(message.val, Int.max)
+    #expect(message.id == "the_id")
+    #expect(message.val == Int.max)
   }
 
-  func testVoidAction() async throws {
+  @Test func voidAction() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClient(ffiClient: fakeFfiClient)
 
-    try await client.action("nullResult")
+    let _: String? = try await client.action("nullResult")
 
-    XCTAssertEqual(fakeFfiClient.actionCalls, ["nullResult"])
+    #expect(fakeFfiClient.actionCalls == ["nullResult"])
   }
 
-  func testMutationTypeMismatchThrows() async throws {
+  @Test func mutationTypeMismatchThrows() async throws {
     let client = ConvexMobile.ConvexClient(ffiClient: FakeMobileConvexClient())
 
-    do {
+    await #expect(throws: DecodingError.self) {
       let _: Message = try await client.mutation("typeMismatch")
-      XCTFail("Expected a DecodingError to be thrown")
-    } catch is DecodingError {
-      // Expected: decoding "just a plain string" into Message fails gracefully
-    } catch {
-      XCTFail("Expected DecodingError but got \(type(of: error)): \(error)")
     }
   }
 
-  func testSubscribeTypeMismatchSendsError() async throws {
-    let expectation = self.expectation(description: "subscribe error")
-    var receivedError: ClientError?
+  @Test func subscribeTypeMismatchSendsError() async throws {
     let client = ConvexMobile.ConvexClient(ffiClient: FakeMobileConvexClient())
 
-    let cancellationHandle = client.subscribe(to: "typeMismatch").sink(
-      receiveCompletion: { completion in
-        switch completion {
-        case .finished:
-          break
-        case .failure(let clientError):
-          receivedError = clientError
-          expectation.fulfill()
-        }
-      },
-      receiveValue: { (value: Message) in
-        XCTFail("Should not receive a value for a type mismatch")
-      })
-
-    await fulfillment(of: [expectation], timeout: 10)
-
-    if case .InternalError = receivedError! {
-      // Expected: decoding error surfaced as InternalError
-    } else {
-      XCTFail("Expected InternalError but got \(receivedError!)")
+    await #expect(throws: DecodingError.self) {
+      let _: Message = try await firstValue(from: client.stream(to: "typeMismatch"))
     }
   }
 
-  func testLoginSetsAuthCallbackOnFfiClient() async throws {
+  @Test func loginSetsAuthCallbackOnFfiClient() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: FakeAuthProvider())
 
     let result = await client.login()
 
-    XCTAssertEqual(try result.get(), FakeAuthProvider.CREDENTIALS)
-    // The callback provider should have been set
-    XCTAssertNotNil(fakeFfiClient.authProvider)
-    // Fetching the token from the provider should return the extracted token
-    let token = try await fakeFfiClient.authProvider?.fetchToken(forceRefresh: false)
-    XCTAssertEqual(token, "extracted: \(FakeAuthProvider.CREDENTIALS)")
+    #expect(try result.get() == FakeAuthProvider.credentials)
+    let authProvider = try #require(fakeFfiClient.authProvider)
+    let token = try await authProvider.fetchToken(forceRefresh: false)
+    #expect(token == "extracted: \(FakeAuthProvider.credentials)")
   }
 
-  func testLoginFromCacheSetsAuthCallbackOnFfiClient() async throws {
+  @Test func loginFromCacheSetsAuthCallbackOnFfiClient() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: FakeAuthProvider())
 
     let result = await client.loginFromCache()
 
-    XCTAssertEqual(try result.get(), FakeAuthProvider.CREDENTIALS)
-    XCTAssertNotNil(fakeFfiClient.authProvider)
-    let token = try await fakeFfiClient.authProvider?.fetchToken(forceRefresh: false)
-    XCTAssertEqual(token, "extracted: \(FakeAuthProvider.CREDENTIALS)")
+    #expect(try result.get() == FakeAuthProvider.credentials)
+    let authProvider = try #require(fakeFfiClient.authProvider)
+    let token = try await authProvider.fetchToken(forceRefresh: false)
+    #expect(token == "extracted: \(FakeAuthProvider.credentials)")
   }
 
-  func testLogoutClearsAuthCallbackOnFfiClient() async throws {
+  @Test func logoutClearsAuthCallbackOnFfiClient() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: FakeAuthProvider())
 
-    // Login first to set up auth
     let _ = await client.login()
-    XCTAssertNotNil(fakeFfiClient.authProvider)
+    #expect(fakeFfiClient.authProvider != nil)
 
-    await client.logout()
+    let logoutResult = await client.logout()
+    try logoutResult.get()
 
-    XCTAssertNil(fakeFfiClient.authProvider)
+    #expect(fakeFfiClient.authProvider == nil)
   }
 
-  func testLoginUpdatesAuthState() async throws {
-    let expectation = self.expectation(description: "authState")
-    var credentials: String?
+  @Test func loginUpdatesAuthState() async throws {
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: FakeMobileConvexClient(), authProvider: FakeAuthProvider())
 
-    let cancellationHandle = client.authState.sink(
-      receiveValue: { (value: AuthState<String>) in
+    let authStateTask = Task { () -> String? in
+      for await value in client.authStates {
         if case .authenticated(let creds) = value {
-          credentials = creds
-          expectation.fulfill()
+          return creds
         }
-      })
+      }
+      return nil
+    }
 
     let result = await client.login()
+    let credentials = await authStateTask.value
 
-    await fulfillment(of: [expectation], timeout: 10)
-
-    XCTAssertEqual(try result.get(), FakeAuthProvider.CREDENTIALS)
-    XCTAssertEqual(credentials, FakeAuthProvider.CREDENTIALS)
+    #expect(try result.get() == FakeAuthProvider.credentials)
+    #expect(credentials == FakeAuthProvider.credentials)
   }
 
-  func testForceRefreshCallsLoginFromCacheForFreshToken() async throws {
+  @Test func forceRefreshCallsLoginFromCacheForFreshToken() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let fakeAuthProvider = FakeAuthProvider()
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: fakeAuthProvider)
 
-    // Initial login sets the auth callback
     let result = await client.login()
-    XCTAssertEqual(try result.get(), FakeAuthProvider.CREDENTIALS)
+    #expect(try result.get() == FakeAuthProvider.credentials)
 
-    // loginFromCache is not called during login() (only login is)
     let callCountAfterLogin = fakeAuthProvider.loginFromCacheCallCount
+    let authProvider = try #require(fakeFfiClient.authProvider)
+    let token = try await authProvider.fetchToken(forceRefresh: true)
 
-    // Fetch with forceRefresh: true should call through to loginFromCache
-    let token = try await fakeFfiClient.authProvider?.fetchToken(forceRefresh: true)
-    XCTAssertEqual(token, "extracted: \(FakeAuthProvider.CREDENTIALS)")
-    XCTAssertEqual(fakeAuthProvider.loginFromCacheCallCount, callCountAfterLogin + 1)
+    #expect(token == "extracted: \(FakeAuthProvider.credentials)")
+    #expect(fakeAuthProvider.loginFromCacheCallCount == callCountAfterLogin + 1)
   }
 
-  func testTokenRefreshUpdatesAuthCallback() async throws {
-    let expectation = self.expectation(description: "setAuthCallbackCalled")
+  @Test func tokenRefreshUpdatesAuthCallback() async throws {
+    let setAuthCallbackSignal = AsyncStream<Void>.makeStream()
     let fakeFfiClient = FakeMobileConvexClient()
     let fakeAuthProvider = FakeAuthProvider()
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: fakeAuthProvider)
 
-    // Initial login sets the auth callback
     let result = await client.login()
-    XCTAssertEqual(try result.get(), FakeAuthProvider.CREDENTIALS)
-    let initialToken = try await fakeFfiClient.authProvider?.fetchToken(forceRefresh: false)
-    XCTAssertEqual(initialToken, "extracted: \(FakeAuthProvider.CREDENTIALS)")
+    #expect(try result.get() == FakeAuthProvider.credentials)
 
-    // Set up expectation for the next setAuthCallback call
-    fakeFfiClient.setAuthCallbackExpectation = expectation
+    let initialAuthProvider = try #require(fakeFfiClient.authProvider)
+    let initialToken = try await initialAuthProvider.fetchToken(forceRefresh: false)
+    #expect(initialToken == "extracted: \(FakeAuthProvider.credentials)")
 
-    // Simulate a token refresh by invoking the stored callback with a new token
+    fakeFfiClient.setAuthCallbackSignal = setAuthCallbackSignal.continuation
     let refreshedToken = "refreshed_token_value"
     fakeAuthProvider.simulateTokenRefresh(newToken: refreshedToken)
 
-    await fulfillment(of: [expectation], timeout: 10)
+    _ = try await firstValue(from: setAuthCallbackSignal.stream)
 
-    // The provider's cached token should now be the refreshed token
-    let updatedToken = try await fakeFfiClient.authProvider?.fetchToken(forceRefresh: false)
-    XCTAssertEqual(updatedToken, refreshedToken)
+    let updatedAuthProvider = try #require(fakeFfiClient.authProvider)
+    let updatedToken = try await updatedAuthProvider.fetchToken(forceRefresh: false)
+    #expect(updatedToken == refreshedToken)
   }
 
-  func testTokenRefreshWithNilSetsAuthStateToUnauthenticated() async throws {
-    let expectation = self.expectation(description: "authStateUnauthenticated")
+  @Test func tokenRefreshWithNilSetsAuthStateToUnauthenticated() async throws {
     let fakeFfiClient = FakeMobileConvexClient()
     let fakeAuthProvider = FakeAuthProvider()
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: fakeAuthProvider)
 
-    var didBecomeUnauthenticated = false
-    let cancellationHandle = client.authState.sink(
-      receiveValue: { (value: AuthState<String>) in
+    let authStateTask = Task { () -> Bool in
+      var didBecomeUnauthenticated = false
+      for await value in client.authStates {
         if case .unauthenticated = value {
-          // Skip the initial unauthenticated state
           if didBecomeUnauthenticated {
-            expectation.fulfill()
+            return true
           }
         } else if case .authenticated = value {
           didBecomeUnauthenticated = true
         }
-      })
+      }
+      return false
+    }
 
-    // Initial login sets the auth state to authenticated
     let result = await client.login()
-    XCTAssertEqual(try result.get(), FakeAuthProvider.CREDENTIALS)
+    #expect(try result.get() == FakeAuthProvider.credentials)
 
-    // Simulate a token refresh with nil (session became invalid)
     fakeAuthProvider.simulateTokenRefresh(newToken: nil)
+    let becameUnauthenticated = await authStateTask.value
 
-    await fulfillment(of: [expectation], timeout: 10)
-
-    // Verify the auth callback provider was cleared and state is unauthenticated
-    XCTAssertNil(fakeFfiClient.authProvider)
+    #expect(becameUnauthenticated)
+    #expect(fakeFfiClient.authProvider == nil)
   }
 }
 
-class FakeMobileConvexClient: UniFFI.MobileConvexClientProtocol {
+private func firstValue<Element>(
+  from stream: AsyncThrowingStream<Element, Error>
+) async throws -> Element {
+  var iterator = stream.makeAsyncIterator()
+  guard let value = try await iterator.next() else {
+    throw ClientError.InternalError(msg: "Expected stream value")
+  }
+  return value
+}
+
+private func firstValue<Element>(
+  from stream: AsyncStream<Element>
+) async throws -> Element {
+  var iterator = stream.makeAsyncIterator()
+  guard let value = await iterator.next() else {
+    throw ClientError.InternalError(msg: "Expected stream value")
+  }
+  return value
+}
+
+final class FakeMobileConvexClient: UniFFI.MobileConvexClientProtocol, @unchecked Sendable {
   var cancellationCount = 0
   var subscriptionArgs: [String: String] = [:]
   var mutationCalls: [String] = []
   var actionCalls: [String] = []
+  var queryCalls: [String] = []
   var auth: String? = nil
   var authProvider: (any AuthTokenProvider)? = nil
-  var resultPublished: XCTestExpectation?
-  var setAuthExpectation: XCTestExpectation?
-  var setAuthCallbackExpectation: XCTestExpectation?
+  var resultPublished: AsyncStream<Void>.Continuation?
+  var setAuthSignal: AsyncStream<Void>.Continuation?
+  var setAuthCallbackSignal: AsyncStream<Void>.Continuation?
 
-  init(initialAuth: String? = nil, resultPublished: XCTestExpectation? = nil) {
+  init(initialAuth: String? = nil, resultPublished: AsyncStream<Void>.Continuation? = nil) {
     self.auth = initialAuth
     self.resultPublished = resultPublished
   }
@@ -482,7 +363,9 @@ class FakeMobileConvexClient: UniFFI.MobileConvexClientProtocol {
     if name == "typeMismatch" {
       return "\"just a plain string\""
     }
-    let receivedConvexInt = args["anInt"]!
+    guard let receivedConvexInt = args["anInt"] else {
+      throw ClientError.InternalError(msg: "Missing anInt")
+    }
     return "{\"_id\": \"the_id\", \"val\": \(receivedConvexInt), \"extra\": null}"
   }
 
@@ -494,58 +377,72 @@ class FakeMobileConvexClient: UniFFI.MobileConvexClientProtocol {
     if name == "typeMismatch" {
       return "\"just a plain string\""
     }
-    let receivedConvexInt = args["anInt"]!
+    guard let receivedConvexInt = args["anInt"] else {
+      throw ClientError.InternalError(msg: "Missing anInt")
+    }
     return "{\"_id\": \"the_id\", \"val\": \(receivedConvexInt), \"extra\": null}"
   }
 
   func query(name: String, args: [String: String]) async throws -> String {
-    return "foo"
+    queryCalls.append(name)
+    let receivedConvexInt = args["anInt"] ?? "{\"$integer\":\"KgAAAAAAAAA=\"}"
+    return "{\"_id\": \"the_id\", \"val\": \(receivedConvexInt), \"extra\": null}"
   }
 
   func setAuth(token: String?) async throws {
     auth = token
-    setAuthExpectation?.fulfill()
+    setAuthSignal?.yield()
+    setAuthSignal?.finish()
   }
 
   func setAuthCallback(provider: (any AuthTokenProvider)?) async throws {
     authProvider = provider
-    setAuthCallbackExpectation?.fulfill()
+    setAuthCallbackSignal?.yield()
+    setAuthCallbackSignal?.finish()
   }
 
   func subscribe(name: String, args: [String: String], subscriber: any UniFFI.QuerySubscriber)
     async throws -> UniFFI.SubscriptionHandle
   {
     subscriptionArgs = args
+    let subscriberBox = QuerySubscriberBox(subscriber)
     let _ = Task {
       try await Task.sleep(nanoseconds: UInt64(0.05 * 1_000_000_000))
       if name == "typeMismatch" {
-        subscriber.onUpdate(
+        subscriberBox.subscriber.onUpdate(
           value: "\"just a plain string\"")
       } else if name == "missingVal" {
-        subscriber.onUpdate(
+        subscriberBox.subscriber.onUpdate(
           value: "{\"_id\": \"the_id\", \"extra\": null}")
       } else if name == "nullVal" {
-        subscriber.onUpdate(
+        subscriberBox.subscriber.onUpdate(
           value: "{\"_id\": \"the_id\", \"val\": null, \"extra\": null}")
       } else {
-        subscriber.onUpdate(
+        subscriberBox.subscriber.onUpdate(
           value: "{\"_id\": \"the_id\", \"val\": {\"$integer\":\"KgAAAAAAAAA=\"}, \"extra\": null}")
         if name == "dupeVals" {
-          subscriber.onUpdate(
+          subscriberBox.subscriber.onUpdate(
             value:
               "{\"_id\": \"the_id\", \"val\": {\"$integer\":\"KgAAAAAAAAA=\"}, \"extra\": null}")
         }
       }
-      resultPublished?.fulfill()
-
+      resultPublished?.yield()
+      resultPublished?.finish()
     }
     return FakeSubscriptionHandle(client: self)
   }
-
 }
 
-class FakeAuthProvider: AuthProvider {
-  static let CREDENTIALS = "credentials, yo"
+private final class QuerySubscriberBox: @unchecked Sendable {
+  let subscriber: any UniFFI.QuerySubscriber
+
+  init(_ subscriber: any UniFFI.QuerySubscriber) {
+    self.subscriber = subscriber
+  }
+}
+
+final class FakeAuthProvider: AuthProvider, @unchecked Sendable {
+  static let credentials = "credentials, yo"
 
   private var storedOnIdToken: (@Sendable (String?) -> Void)?
   var loginFromCacheCallCount = 0
@@ -553,25 +450,22 @@ class FakeAuthProvider: AuthProvider {
   func loginFromCache(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
     loginFromCacheCallCount += 1
     storedOnIdToken = onIdToken
-    onIdToken("extracted: \(FakeAuthProvider.CREDENTIALS)")
-    return FakeAuthProvider.CREDENTIALS
+    onIdToken("extracted: \(Self.credentials)")
+    return Self.credentials
   }
 
   func login(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
     storedOnIdToken = onIdToken
-    onIdToken("extracted: \(FakeAuthProvider.CREDENTIALS)")
-    return FakeAuthProvider.CREDENTIALS
+    onIdToken("extracted: \(Self.credentials)")
+    return Self.credentials
   }
 
-  func logout() async throws {
-
-  }
+  func logout() async throws {}
 
   func extractIdToken(from authResult: String) -> String {
     return "extracted: \(authResult)"
   }
 
-  /// Simulates a token refresh by invoking the stored callback with a new token.
   func simulateTokenRefresh(newToken: String?) {
     storedOnIdToken?(newToken)
   }
@@ -579,6 +473,7 @@ class FakeAuthProvider: AuthProvider {
 
 class FakeSubscriptionHandle: UniFFI.SubscriptionHandle {
   let client: FakeMobileConvexClient
+
   init(client: FakeMobileConvexClient) {
     self.client = client
     super.init(noPointer: UniFFI.SubscriptionHandle.NoPointer())
@@ -593,7 +488,7 @@ class FakeSubscriptionHandle: UniFFI.SubscriptionHandle {
   }
 }
 
-private struct MessageWithOptionalVal: Decodable {
+private struct MessageWithOptionalVal: Decodable, Sendable {
   let id: String
   @OptionalConvexInt
   var val: Int? = nil
@@ -604,7 +499,7 @@ private struct MessageWithOptionalVal: Decodable {
   }
 }
 
-private struct Message: Decodable, Equatable {
+private struct Message: Decodable, Equatable, Sendable {
   let id: String
   @ConvexInt
   var val: Int

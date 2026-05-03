@@ -26,13 +26,19 @@ let package = Package(
     // Targets can depend on other targets in this package and products from dependencies.
     .target(
       name: "ConvexMobile",
-      dependencies: [.target(name: "UniFFI")]),
+      dependencies: [.target(name: "UniFFI")],
+      swiftSettings: [
+        .enableExperimentalFeature("StrictConcurrency"),
+      ]),
     .target(
       name: "UniFFI",
       dependencies: [.target(name: "ConvexMobileCoreRS")],
       path: "Sources/UniFFI"),
     .testTarget(
       name: "ConvexMobileTests",
-      dependencies: ["ConvexMobile"]),
+      dependencies: ["ConvexMobile"],
+      swiftSettings: [
+        .enableExperimentalFeature("StrictConcurrency"),
+      ]),
   ]
 )

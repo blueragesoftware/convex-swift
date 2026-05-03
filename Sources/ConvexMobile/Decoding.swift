@@ -7,8 +7,84 @@
 
 import Foundation
 
+private enum ConvexTypeKey: String, CodingKey {
+  case integer = "$integer"
+  case float = "$float"
+}
+
+private enum ConvexDecoding {
+  static func decodeInteger<IntegerType: FixedWidthInteger>(
+    _ type: IntegerType.Type,
+    from base64String: String,
+    codingPath: [CodingKey]
+  ) throws -> IntegerType {
+    let data = try decodeBase64Bytes(
+      base64String,
+      expectedByteCount: MemoryLayout<Int64>.size,
+      codingPath: codingPath
+    )
+
+    let decoded = data.withUnsafeBytes { rawPtr in
+      rawPtr.load(as: Int64.self)
+    }
+
+    guard let value = IntegerType(exactly: decoded) else {
+      throw DecodingError.dataCorrupted(
+        DecodingError.Context(
+          codingPath: codingPath,
+          debugDescription: "\(decoded) cannot be represented as \(IntegerType.self)."
+        )
+      )
+    }
+    return value
+  }
+
+  static func decodeFloat<FloatingPointType: BinaryFloatingPoint>(
+    _ type: FloatingPointType.Type,
+    from base64String: String,
+    codingPath: [CodingKey]
+  ) throws -> FloatingPointType {
+    let data = try decodeBase64Bytes(
+      base64String,
+      expectedByteCount: MemoryLayout<Double>.size,
+      codingPath: codingPath
+    )
+
+    return data.withUnsafeBytes { rawPtr in
+      let decoded = rawPtr.load(as: Double.self)
+      return FloatingPointType(decoded)
+    }
+  }
+
+  private static func decodeBase64Bytes(
+    _ base64String: String,
+    expectedByteCount: Int,
+    codingPath: [CodingKey]
+  ) throws -> Data {
+    guard let data = Data(base64Encoded: base64String) else {
+      throw DecodingError.dataCorrupted(
+        DecodingError.Context(
+          codingPath: codingPath,
+          debugDescription: "Expected a base64-encoded Convex numeric payload."
+        )
+      )
+    }
+
+    guard data.count == expectedByteCount else {
+      throw DecodingError.dataCorrupted(
+        DecodingError.Context(
+          codingPath: codingPath,
+          debugDescription: "Expected \(expectedByteCount) bytes, received \(data.count)."
+        )
+      )
+    }
+
+    return data
+  }
+}
+
 @propertyWrapper
-public struct ConvexInt<IntegerType: FixedWidthInteger>: Decodable, Equatable {
+public struct ConvexInt<IntegerType: FixedWidthInteger & Sendable>: Decodable, Equatable, Sendable {
   public var wrappedValue: IntegerType
 
   public init(wrappedValue: IntegerType) {
@@ -18,19 +94,16 @@ public struct ConvexInt<IntegerType: FixedWidthInteger>: Decodable, Equatable {
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: ConvexTypeKey.self)
     let b64int = try container.decode(String.self, forKey: .integer)
-    self.wrappedValue = Data(base64Encoded: b64int)!.withUnsafeBytes({
-      (rawPtr: UnsafeRawBufferPointer) in
-      return rawPtr.load(as: IntegerType.self)
-    })
-  }
-
-  enum ConvexTypeKey: String, CodingKey {
-    case integer = "$integer"
+    self.wrappedValue = try ConvexDecoding.decodeInteger(
+      IntegerType.self,
+      from: b64int,
+      codingPath: container.codingPath + [ConvexTypeKey.integer]
+    )
   }
 }
 
 @propertyWrapper
-public struct OptionalConvexInt<IntegerType: FixedWidthInteger>: Decodable, Equatable {
+public struct OptionalConvexInt<IntegerType: FixedWidthInteger & Sendable>: Decodable, Equatable, Sendable {
   public var wrappedValue: IntegerType?
 
   public init(wrappedValue: IntegerType?) {
@@ -38,22 +111,25 @@ public struct OptionalConvexInt<IntegerType: FixedWidthInteger>: Decodable, Equa
   }
 
   public init(from decoder: Decoder) throws {
-    if let container = try? decoder.container(keyedBy: ConvexTypeKey.self) {
-      let b64int = try container.decode(String.self, forKey: .integer)
-      self.wrappedValue = Data(base64Encoded: b64int)!.withUnsafeBytes({
-        (rawPtr: UnsafeRawBufferPointer) in
-        return rawPtr.load(as: IntegerType.self)
-      })
+    let singleValueContainer = try decoder.singleValueContainer()
+    guard !singleValueContainer.decodeNil() else {
+      self.wrappedValue = nil
+      return
     }
-  }
 
-  enum ConvexTypeKey: String, CodingKey {
-    case integer = "$integer"
+    let container = try decoder.container(keyedBy: ConvexTypeKey.self)
+    let b64int = try container.decode(String.self, forKey: .integer)
+    self.wrappedValue = try ConvexDecoding.decodeInteger(
+      IntegerType.self,
+      from: b64int,
+      codingPath: container.codingPath + [ConvexTypeKey.integer]
+    )
   }
 }
 
 @propertyWrapper
-public struct ConvexFloat<FloatingPointType: BinaryFloatingPoint & Decodable>: Decodable, Equatable
+public struct ConvexFloat<FloatingPointType: BinaryFloatingPoint & Decodable & Sendable>: Decodable, Equatable,
+  Sendable
 {
   public var wrappedValue: FloatingPointType
 
@@ -62,26 +138,27 @@ public struct ConvexFloat<FloatingPointType: BinaryFloatingPoint & Decodable>: D
   }
 
   public init(from decoder: Decoder) throws {
-    if let container = try? decoder.container(keyedBy: ConvexTypeKey.self) {
+    do {
+      let container = try decoder.container(keyedBy: ConvexTypeKey.self)
       let b64float = try container.decode(String.self, forKey: .float)
-      self.wrappedValue = Data(base64Encoded: b64float)!.withUnsafeBytes({
-        (rawPtr: UnsafeRawBufferPointer) in
-        let decoded = rawPtr.load(as: Double.self)
-        return FloatingPointType.self(decoded)
-      })
-    } else {
+      self.wrappedValue = try ConvexDecoding.decodeFloat(
+        FloatingPointType.self,
+        from: b64float,
+        codingPath: container.codingPath + [ConvexTypeKey.float]
+      )
+    } catch DecodingError.typeMismatch(_, _) {
+      self.wrappedValue = try decoder.singleValueContainer().decode(FloatingPointType.self)
+    } catch DecodingError.valueNotFound(_, _) {
+      self.wrappedValue = try decoder.singleValueContainer().decode(FloatingPointType.self)
+    } catch DecodingError.keyNotFound(_, _) {
       self.wrappedValue = try decoder.singleValueContainer().decode(FloatingPointType.self)
     }
-  }
-
-  enum ConvexTypeKey: String, CodingKey {
-    case float = "$float"
   }
 }
 
 @propertyWrapper
-public struct OptionalConvexFloat<FloatingPointType: BinaryFloatingPoint & Decodable>: Decodable,
-  Equatable
+public struct OptionalConvexFloat<FloatingPointType: BinaryFloatingPoint & Decodable & Sendable>: Decodable,
+  Equatable, Sendable
 {
   public var wrappedValue: FloatingPointType?
 
@@ -90,22 +167,27 @@ public struct OptionalConvexFloat<FloatingPointType: BinaryFloatingPoint & Decod
   }
 
   public init(from decoder: Decoder) throws {
-    if let container = try? decoder.container(keyedBy: ConvexTypeKey.self) {
-      let b64float = try container.decode(String.self, forKey: .float)
-      self.wrappedValue = Data(base64Encoded: b64float)!.withUnsafeBytes({
-        (rawPtr: UnsafeRawBufferPointer) in
-        let decoded = rawPtr.load(as: Double.self)
-        return FloatingPointType.self(decoded)
-      })
-    } else {
-      if let value = try? decoder.singleValueContainer().decode(FloatingPointType.self) {
-        self.wrappedValue = value
-      }
+    let singleValueContainer = try decoder.singleValueContainer()
+    guard !singleValueContainer.decodeNil() else {
+      self.wrappedValue = nil
+      return
     }
-  }
 
-  enum ConvexTypeKey: String, CodingKey {
-    case float = "$float"
+    do {
+      let container = try decoder.container(keyedBy: ConvexTypeKey.self)
+      let b64float = try container.decode(String.self, forKey: .float)
+      self.wrappedValue = try ConvexDecoding.decodeFloat(
+        FloatingPointType.self,
+        from: b64float,
+        codingPath: container.codingPath + [ConvexTypeKey.float]
+      )
+    } catch DecodingError.typeMismatch(_, _) {
+      self.wrappedValue = try singleValueContainer.decode(FloatingPointType.self)
+    } catch DecodingError.valueNotFound(_, _) {
+      self.wrappedValue = try singleValueContainer.decode(FloatingPointType.self)
+    } catch DecodingError.keyNotFound(_, _) {
+      self.wrappedValue = try singleValueContainer.decode(FloatingPointType.self)
+    }
   }
 }
 

@@ -5,49 +5,55 @@
 //  Created by Christian Wyglendowski on 10/1/24.
 //
 
-import Combine
 import ConvexMobile
 import Testing
 
 private let deploymentUrl = "https://curious-lynx-309.convex.cloud"
 
+private func firstValue<Element>(
+  from stream: AsyncThrowingStream<Element, Error>
+) async throws -> Element {
+  var iterator = stream.makeAsyncIterator()
+  guard let value = try await iterator.next() else {
+    throw ClientError.InternalError(msg: "Expected stream value")
+  }
+  return value
+}
+
 @Suite(.serialized) struct Test {
   init() async throws {
     let client = ConvexClient(deploymentUrl: deploymentUrl)
-    try await client.mutation("messages:clearAll")
+    let _: String? = try await client.mutation("messages:clearAll")
   }
 
   @Test func test_empty_subscribe() async throws {
     let client = ConvexClient(deploymentUrl: deploymentUrl)
-    let s = client.subscribe(to: "messages:list", yielding: [Message]?.self)
-    var received = 0
-    for await messages in s.replaceError(with: nil).first().values {
-      #expect(messages! == [])
-      received += 1
-    }
-    #expect(received == 1)
+    let messages: [Message]? = try await firstValue(from: client.stream(to: "messages:list"))
+    let requiredMessages = try #require(messages)
+    #expect(requiredMessages == [])
   }
 
   @Test func test_convex_error_in_subscription() async throws {
     let client = ConvexClient(deploymentUrl: deploymentUrl)
-    let s: AnyPublisher<[Message]?, ClientError> = client.subscribe(
-      to: "messages:list", with: ["forceError": true])
     await #expect(throws: ClientError.ConvexError(data: "\"forced error data\"")) {
-      for try await _ in s.first().values {}
+      let _: [Message]? = try await firstValue(from: client.stream(
+        to: "messages:list",
+        with: ["forceError": true]
+      ))
     }
   }
 
   @Test func test_convex_error_in_action() async throws {
     let client = ConvexClient(deploymentUrl: deploymentUrl)
     await #expect(throws: ClientError.ConvexError(data: "\"forced error data\"")) {
-      try await client.action("messages:forceActionError")
+      let _: String? = try await client.action("messages:forceActionError")
     }
   }
 
   @Test func test_convex_error_in_mutation() async throws {
     let client = ConvexClient(deploymentUrl: deploymentUrl)
     await #expect(throws: ClientError.ConvexError(data: "\"forced error data\"")) {
-      try await client.mutation("messages:forceMutationError")
+      let _: String? = try await client.mutation("messages:forceMutationError")
     }
   }
 
@@ -55,52 +61,45 @@ private let deploymentUrl = "https://curious-lynx-309.convex.cloud"
     let clientA = ConvexClient(deploymentUrl: deploymentUrl)
     let clientB = ConvexClient(deploymentUrl: deploymentUrl)
 
-    let messagesA: AnyPublisher<[Message]?, ClientError> = clientA.subscribe(to: "messages:list")
-
-    try await clientB.mutation(
+    let _: String? = try await clientB.mutation(
       "messages:send", with: ["author": "Client B", "body": "Test 123"])
 
-    var received = 0
-    for await messages in messagesA.replaceError(with: nil).first().values {
-      #expect(messages! == [Message(author: "Client B", body: "Test 123")])
-      received += 1
-    }
-    #expect(received == 1)
+    let messages: [Message]? = try await firstValue(from: clientA.stream(to: "messages:list"))
+    let requiredMessages = try #require(messages)
+    #expect(requiredMessages == [Message(author: "Client B", body: "Test 123")])
   }
 
   @Test func send_and_receive_multiple_messages() async throws {
     let clientA = ConvexClient(deploymentUrl: deploymentUrl)
     let clientB = ConvexClient(deploymentUrl: deploymentUrl)
 
-    let messagesA: AnyPublisher<[Message]?, ClientError> = clientA.subscribe(to: "messages:list")
-
-    var receivedMessages: [[Message]] = []
-
-    let receiveTask = Task {
-      for await messages in messagesA.replaceError(with: nil).output(in: 0...3).values {
+    let ready = AsyncStream<Void>.makeStream()
+    let receiveTask = Task { () throws -> [[Message]] in
+      var receivedMessages: [[Message]] = []
+      for try await messages in clientA.stream(to: "messages:list", yielding: [Message]?.self) {
         receivedMessages.append(messages ?? [])
-      }
-    }
-
-    Task {
-      // Sort of a hack - first wait for the initial value from the receiveTask. Otherwise
-      // this task can sometimes finish first and the receive task never gets all of the
-      // results that it expects (misses the original empty list).
-      while true {
         if receivedMessages.count == 1 {
+          ready.continuation.yield()
+          ready.continuation.finish()
+        }
+        if receivedMessages.count == 4 {
           break
         }
-        await Task.yield()
       }
-      for i in 1...3 {
-        try await clientB.mutation(
-          "messages:send", with: ["author": "Client B", "body": "Message \(i)"])
-      }
+      return receivedMessages
     }
 
-    await receiveTask.value
+    for await _ in ready.stream {
+      break
+    }
+    for i in 1...3 {
+      let _: String? = try await clientB.mutation(
+        "messages:send", with: ["author": "Client B", "body": "Message \(i)"])
+    }
 
-    #expect(receivedMessages.count == 4)
+    let receivedMessages = try await receiveTask.value
+
+    try #require(receivedMessages.count == 4)
     #expect(receivedMessages[0] == [])
     #expect(receivedMessages[1] == [Message(author: "Client B", body: "Message 1")])
     #expect(
@@ -162,29 +161,32 @@ private let deploymentUrl = "https://curious-lynx-309.convex.cloud"
   @Test func can_observe_websocket_state() async throws {
     let client = ConvexClient(deploymentUrl: deploymentUrl)
 
-    let publisher = client.watchWebSocketState()
-      
-    var states: [WebSocketState] = []
-    let receiveTask = Task {
-      for await state in publisher.prefix(2).values {
+    let receiveTask = Task { () -> [ConvexWebSocketState] in
+      var states: [ConvexWebSocketState] = []
+      for await state in client.watchWebSocketStates() {
         states.append(state)
+        if states.count == 2 {
+          break
+        }
       }
+      return states
     }
     
-    try await client.mutation("messages:clearAll")
+    let _: String? = try await client.mutation("messages:clearAll")
 
-    await receiveTask.value
+    let states = await receiveTask.value
     
+    try #require(states.count == 2)
     #expect(states == [.connecting, .connected])
   }
 }
 
-private struct Message: Decodable, Equatable {
+private struct Message: Decodable, Equatable, Sendable {
   let author: String
   let body: String
 }
 
-private struct NumericValues: Decodable, Equatable {
+private struct NumericValues: Decodable, Equatable, Sendable {
   init(anInt64: Int64, aFloat64: Float64, jsNumber: Double, anInt32: Int32, aFloat32: Float32) {
     self.anInt64 = anInt64
     self.aFloat64 = aFloat64
@@ -226,7 +228,7 @@ private struct NumericValues: Decodable, Equatable {
   var aPlainInt: Int { Int(jsNumber) }
 }
 
-private struct SpecialFloats: Decodable, Equatable {
+private struct SpecialFloats: Decodable, Equatable, Sendable {
   @ConvexFloat
   var f64Nan: Float64 = Float64.nan
   @ConvexFloat
@@ -252,7 +254,7 @@ private struct SpecialFloats: Decodable, Equatable {
   }
 }
 
-private struct NullableFloats: Decodable, Equatable {
+private struct NullableFloats: Decodable, Equatable, Sendable {
   @OptionalConvexFloat
   var aNullableDouble: Double?
   @OptionalConvexFloat
