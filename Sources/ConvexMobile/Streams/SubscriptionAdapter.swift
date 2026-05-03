@@ -22,7 +22,7 @@ final class SubscriptionAdapter<T: Decodable & Sendable>: QuerySubscriber {
 
   func onUpdate(value: String) {
     do {
-      continuation.yield(try JSONDecoder().decode(T.self, from: Data(value.utf8)))
+      continuation.yield(try ConvexDecoder().decode(T.self, from: value))
     } catch {
       continuation.finish(throwing: error)
     }

@@ -11,7 +11,7 @@ typealias RemoteCall = (String, [String: String]) async throws -> String
 ///
 /// Consumers of this client should use Swift's ``Decodable``  protocol for handling data received from the
 /// Convex backend.
-public class ConvexClient: @unchecked Sendable {
+public final class ConvexClient: @unchecked Sendable {
   let ffiClient: UniFFI.MobileConvexClientProtocol
   private let webSocketStateAdapter = WebSocketStateAdapter()
 
@@ -38,7 +38,7 @@ public class ConvexClient: @unchecked Sendable {
   ///   - output: The type of data that will be returned in the stream, as a convenience to callers
   ///             where the type can't be easily inferred.
   public func stream<T: Decodable & Sendable>(
-    to name: String, with args: [String: ConvexEncodable?]? = nil, yielding output: T.Type? = nil
+    to name: String, with args: [String: ConvexValue?]? = nil, yielding output: T.Type? = nil
   ) -> AsyncThrowingStream<T, Error> {
     let (stream, continuation) = AsyncThrowingStream<T, Error>.makeStream()
     let adapter = SubscriptionAdapter<T>(continuation: continuation)
@@ -54,7 +54,7 @@ public class ConvexClient: @unchecked Sendable {
       do {
         let subscriptionHandle = try await self.ffiClient.subscribe(
           name: name,
-          args: try Self.encode(args: args), subscriber: adapter)
+          args: try ConvexArgumentEncoder.encode(args), subscriber: adapter)
 
         await cancellation.set(handle: subscriptionHandle)
       } catch is CancellationError {
@@ -79,7 +79,7 @@ public class ConvexClient: @unchecked Sendable {
   ///   - name: A value in "module:query_name"  format that will be used when calling the backend
   ///   - args: An optional ``Dictionary`` of arguments to be sent to the backend query function
   @discardableResult
-  public func query<T: Decodable>(_ name: String, with args: [String: ConvexEncodable?]? = nil)
+  public func query<T: Decodable>(_ name: String, with args: [String: ConvexValue?]? = nil)
     async throws -> T
   {
     try await callForResult(name: name, args: args, remoteCall: ffiClient.query)
@@ -93,7 +93,7 @@ public class ConvexClient: @unchecked Sendable {
   ///   - name: A value in "module:mutation_name"  format that will be used when calling the backend
   ///   - args: An optional ``Dictionary`` of arguments to be sent to the backend mutation function
   @discardableResult
-  public func mutation<T: Decodable>(_ name: String, with args: [String: ConvexEncodable?]? = nil)
+  public func mutation<T: Decodable>(_ name: String, with args: [String: ConvexValue?]? = nil)
     async throws -> T
   {
     try await callForResult(name: name, args: args, remoteCall: ffiClient.mutation)
@@ -107,7 +107,7 @@ public class ConvexClient: @unchecked Sendable {
   ///   - name: A value in "module:mutation_name"  format that will be used when calling the backend
   ///   - args: An optional ``Dictionary`` of arguments to be sent to the backend mutation function
   @discardableResult
-  public func action<T: Decodable>(_ name: String, with args: [String: ConvexEncodable?]? = nil)
+  public func action<T: Decodable>(_ name: String, with args: [String: ConvexValue?]? = nil)
     async throws -> T
   {
     return try await callForResult(name: name, args: args, remoteCall: ffiClient.action)
@@ -118,30 +118,20 @@ public class ConvexClient: @unchecked Sendable {
   /// To the client code, both work in a very similar fashion where remote code is invoked and a result is returned. This handler takes care of
   /// encoding the arguments and decoding the result, whether the call is an `action` or `mutation`.
   func callForResult<T: Decodable>(
-    name: String, args: [String: ConvexEncodable?]? = nil, remoteCall: RemoteCall
+    name: String, args: [String: ConvexValue?]? = nil, remoteCall: RemoteCall
   )
     async throws -> T
   {
-    let rawResult = try await remoteCall(name, Self.encode(args: args))
-    return try JSONDecoder().decode(T.self, from: Data(rawResult.utf8))
+    let rawResult = try await remoteCall(name, ConvexArgumentEncoder.encode(args))
+    return try ConvexDecoder().decode(T.self, from: rawResult)
   }
 
   public func watchWebSocketStates() -> AsyncStream<ConvexWebSocketState> {
     return webSocketStateAdapter.stream()
   }
 
-  private static func encode(args: [String: ConvexEncodable?]?) throws -> [String: String] {
-    guard let args else {
-      return [:]
-    }
-
-    var encodedArgs = [String: String]()
-    encodedArgs.reserveCapacity(args.count)
-
-    for (key, value) in args {
-      encodedArgs[key] = try value?.convexEncode() ?? "null"
-    }
-
-    return encodedArgs
+  func setAuthCallback(_ provider: (any AuthTokenProvider)?) async throws {
+    try await ffiClient.setAuthCallback(provider: provider)
   }
+
 }

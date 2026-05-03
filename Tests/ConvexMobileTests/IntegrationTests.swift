@@ -195,15 +195,10 @@ private struct NumericValues: Decodable, Equatable, Sendable {
     self.aFloat32 = aFloat32
   }
 
-  @ConvexInt
   var anInt64: Int64
-  @ConvexFloat
   var aFloat64: Float64
-  @ConvexFloat
   private var jsNumber: Double
-  @ConvexInt
   var anInt32: Int32
-  @ConvexFloat
   var aFloat32: Float32
 
   enum CodingKeys: String, CodingKey {
@@ -214,7 +209,7 @@ private struct NumericValues: Decodable, Equatable, Sendable {
     case aFloat32
   }
 
-  func toArgs() -> [String: ConvexEncodable] {
+  func toArgs() -> [String: ConvexValue] {
     [
       "anInt64": anInt64,
       "aFloat64": aFloat64,
@@ -229,20 +224,14 @@ private struct NumericValues: Decodable, Equatable, Sendable {
 }
 
 private struct SpecialFloats: Decodable, Equatable, Sendable {
-  @ConvexFloat
   var f64Nan: Float64 = Float64.nan
-  @ConvexFloat
   var f64NegInf: Double = -Double.infinity
-  @ConvexFloat
   var f64PosInf: Double = Double.infinity
-  @ConvexFloat
   var f32Nan: Float32 = Float32.nan
-  @ConvexFloat
   var f32NegInf: Float32 = -Float32.infinity
-  @ConvexFloat
   var f32PosInf: Float = Float.infinity
 
-  func toArgs() -> [String: ConvexEncodable] {
+  func toArgs() -> [String: ConvexValue] {
     [
       "f64Nan": f64Nan,
       "f64NegInf": f64NegInf,
@@ -255,8 +244,6 @@ private struct SpecialFloats: Decodable, Equatable, Sendable {
 }
 
 private struct NullableFloats: Decodable, Equatable, Sendable {
-  @OptionalConvexFloat
   var aNullableDouble: Double?
-  @OptionalConvexFloat
   var aMissingDouble: Double?
 }

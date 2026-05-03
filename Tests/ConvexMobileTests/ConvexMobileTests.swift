@@ -90,7 +90,8 @@ struct ConvexMobileTests {
       to: "foo",
       with: [
         "aString": "bar", "aDouble": 42.0, "anInt": 42, "aNil": nil,
-        "aDict": ["sub1": 1.0, "nested": ["ohmy": true]], "aList": [true, false, true, nil],
+        "aDict": ["sub1": 1.0, "nested": ["ohmy": true] as [String: ConvexValue?]] as [String: ConvexValue?],
+        "aList": [true, false, true, nil] as [ConvexValue?],
       ]
     ))
 
@@ -190,9 +191,9 @@ struct ConvexMobileTests {
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: FakeAuthProvider())
 
-    let result = await client.login()
+    let result = try await client.login()
 
-    #expect(try result.get() == FakeAuthProvider.credentials)
+    #expect(result == FakeAuthProvider.credentials)
     let authProvider = try #require(fakeFfiClient.authProvider)
     let token = try await authProvider.fetchToken(forceRefresh: false)
     #expect(token == "extracted: \(FakeAuthProvider.credentials)")
@@ -203,9 +204,9 @@ struct ConvexMobileTests {
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: FakeAuthProvider())
 
-    let result = await client.loginFromCache()
+    let result = try await client.loginFromCache()
 
-    #expect(try result.get() == FakeAuthProvider.credentials)
+    #expect(result == FakeAuthProvider.credentials)
     let authProvider = try #require(fakeFfiClient.authProvider)
     let token = try await authProvider.fetchToken(forceRefresh: false)
     #expect(token == "extracted: \(FakeAuthProvider.credentials)")
@@ -216,11 +217,10 @@ struct ConvexMobileTests {
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: FakeAuthProvider())
 
-    let _ = await client.login()
+    try await client.login()
     #expect(fakeFfiClient.authProvider != nil)
 
-    let logoutResult = await client.logout()
-    try logoutResult.get()
+    try await client.logout()
 
     #expect(fakeFfiClient.authProvider == nil)
   }
@@ -238,10 +238,10 @@ struct ConvexMobileTests {
       return nil
     }
 
-    let result = await client.login()
+    let result = try await client.login()
     let credentials = await authStateTask.value
 
-    #expect(try result.get() == FakeAuthProvider.credentials)
+    #expect(result == FakeAuthProvider.credentials)
     #expect(credentials == FakeAuthProvider.credentials)
   }
 
@@ -251,8 +251,8 @@ struct ConvexMobileTests {
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: fakeAuthProvider)
 
-    let result = await client.login()
-    #expect(try result.get() == FakeAuthProvider.credentials)
+    let result = try await client.login()
+    #expect(result == FakeAuthProvider.credentials)
 
     let callCountAfterLogin = fakeAuthProvider.loginFromCacheCallCount
     let authProvider = try #require(fakeFfiClient.authProvider)
@@ -269,8 +269,8 @@ struct ConvexMobileTests {
     let client = ConvexMobile.ConvexClientWithAuth(
       ffiClient: fakeFfiClient, authProvider: fakeAuthProvider)
 
-    let result = await client.login()
-    #expect(try result.get() == FakeAuthProvider.credentials)
+    let result = try await client.login()
+    #expect(result == FakeAuthProvider.credentials)
 
     let initialAuthProvider = try #require(fakeFfiClient.authProvider)
     let initialToken = try await initialAuthProvider.fetchToken(forceRefresh: false)
@@ -307,8 +307,8 @@ struct ConvexMobileTests {
       return false
     }
 
-    let result = await client.login()
-    #expect(try result.get() == FakeAuthProvider.credentials)
+    let result = try await client.login()
+    #expect(result == FakeAuthProvider.credentials)
 
     fakeAuthProvider.simulateTokenRefresh(newToken: nil)
     let becameUnauthenticated = await authStateTask.value
@@ -490,8 +490,7 @@ class FakeSubscriptionHandle: UniFFI.SubscriptionHandle {
 
 private struct MessageWithOptionalVal: Decodable, Sendable {
   let id: String
-  @OptionalConvexInt
-  var val: Int? = nil
+  var val: Int?
 
   enum CodingKeys: String, CodingKey {
     case id = "_id"
@@ -501,7 +500,6 @@ private struct MessageWithOptionalVal: Decodable, Sendable {
 
 private struct Message: Decodable, Equatable, Sendable {
   let id: String
-  @ConvexInt
   var val: Int
 
   enum CodingKeys: String, CodingKey {
