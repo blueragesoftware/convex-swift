@@ -88,11 +88,7 @@ struct ConvexMobileTests {
 
     let _: Message = try await firstValue(from: client.stream(
       to: "foo",
-      with: [
-        "aString": "bar", "aDouble": 42.0, "anInt": 42, "aNil": nil,
-        "aDict": ["sub1": 1.0, "nested": ["ohmy": true] as [String: ConvexValue?]] as [String: ConvexValue?],
-        "aList": [true, false, true, nil] as [ConvexValue?],
-      ]
+      with: PopulatedSubscribeArgs()
     ))
 
     #expect(fakeFfiClient.subscriptionArgs["aString"] == "\"bar\"")
@@ -326,6 +322,42 @@ private func firstValue<Element>(
     throw ClientError.InternalError(msg: "Expected stream value")
   }
   return value
+}
+
+private struct PopulatedSubscribeArgs: Encodable, Sendable {
+  let aString = "bar"
+  let aDouble = 42.0
+  let anInt = 42
+  let aDict = NestedArgs()
+  let aList: [Bool?] = [true, false, true, nil]
+
+  enum CodingKeys: CodingKey {
+    case aString
+    case aDouble
+    case anInt
+    case aNil
+    case aDict
+    case aList
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(aString, forKey: .aString)
+    try container.encode(aDouble, forKey: .aDouble)
+    try container.encode(anInt, forKey: .anInt)
+    try container.encodeNil(forKey: .aNil)
+    try container.encode(aDict, forKey: .aDict)
+    try container.encode(aList, forKey: .aList)
+  }
+}
+
+private struct NestedArgs: Encodable, Sendable {
+  let sub1 = 1.0
+  let nested = DeeplyNestedArgs()
+}
+
+private struct DeeplyNestedArgs: Encodable, Sendable {
+  let ohmy = true
 }
 
 private func firstValue<Element>(

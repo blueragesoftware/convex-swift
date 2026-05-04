@@ -154,7 +154,7 @@ private func firstValue<Element>(
   @Test func can_receive_null_and_missing_float64_values() async throws {
     let client = ConvexClient(deploymentUrl: deploymentUrl)
     let result: NullableFloats = try await client.action(
-      "messages:echoArgs", with: ["aNullableDouble": nil])
+      "messages:echoArgs", with: NullableFloatArgs())
     #expect(result == NullableFloats())
   }
   
@@ -186,7 +186,7 @@ private struct Message: Decodable, Equatable, Sendable {
   let body: String
 }
 
-private struct NumericValues: Decodable, Equatable, Sendable {
+private struct NumericValues: Codable, Equatable, Sendable {
   init(anInt64: Int64, aFloat64: Float64, jsNumber: Double, anInt32: Int32, aFloat32: Float32) {
     self.anInt64 = anInt64
     self.aFloat64 = aFloat64
@@ -209,21 +209,15 @@ private struct NumericValues: Decodable, Equatable, Sendable {
     case aFloat32
   }
 
-  func toArgs() -> [String: ConvexValue] {
-    [
-      "anInt64": anInt64,
-      "aFloat64": aFloat64,
-      "aPlainInt": jsNumber,
-      "anInt32": anInt32,
-      "aFloat32": aFloat32,
-    ]
+  func toArgs() -> Self {
+    self
   }
 
   // Expose the JavaScript number value as an Int.
   var aPlainInt: Int { Int(jsNumber) }
 }
 
-private struct SpecialFloats: Decodable, Equatable, Sendable {
+private struct SpecialFloats: Codable, Equatable, Sendable {
   var f64Nan: Float64 = Float64.nan
   var f64NegInf: Double = -Double.infinity
   var f64PosInf: Double = Double.infinity
@@ -231,19 +225,23 @@ private struct SpecialFloats: Decodable, Equatable, Sendable {
   var f32NegInf: Float32 = -Float32.infinity
   var f32PosInf: Float = Float.infinity
 
-  func toArgs() -> [String: ConvexValue] {
-    [
-      "f64Nan": f64Nan,
-      "f64NegInf": f64NegInf,
-      "f64PosInf": f64PosInf,
-      "f32Nan": f32Nan,
-      "f32NegInf": f32NegInf,
-      "f32PosInf": f32PosInf,
-    ]
+  func toArgs() -> Self {
+    self
   }
 }
 
 private struct NullableFloats: Decodable, Equatable, Sendable {
   var aNullableDouble: Double?
   var aMissingDouble: Double?
+}
+
+private struct NullableFloatArgs: Encodable, Sendable {
+  enum CodingKeys: CodingKey {
+    case aNullableDouble
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encodeNil(forKey: .aNullableDouble)
+  }
 }

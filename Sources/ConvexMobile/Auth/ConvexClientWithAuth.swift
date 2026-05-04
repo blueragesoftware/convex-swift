@@ -42,7 +42,21 @@ public final class ConvexClientWithAuth<T: Sendable>: Sendable {
   ///   - args: Optional arguments to send to the backend query function.
   ///   - output: The expected stream element type, useful when inference is not enough.
   public func stream<Value: Decodable & Sendable>(
-    to name: String, with args: [String: ConvexValue?]? = nil, yielding output: Value.Type? = nil
+    to name: String, yielding output: Value.Type? = nil
+  ) -> AsyncThrowingStream<Value, Error> {
+    client.stream(to: name, yielding: output)
+  }
+
+  /// Subscribes to the query with the given `name` and streams decoded subscription updates.
+  ///
+  /// The upstream Convex subscription is canceled when the returned stream terminates.
+  ///
+  /// - Parameters:
+  ///   - name: A value in `module:query_name` format that identifies the backend query.
+  ///   - args: An `Encodable` value whose keyed properties will be sent as backend query arguments.
+  ///   - output: The expected stream element type, useful when inference is not enough.
+  public func stream<Value: Decodable & Sendable, Args: Encodable & Sendable>(
+    to name: String, with args: Args, yielding output: Value.Type? = nil
   ) -> AsyncThrowingStream<Value, Error> {
     client.stream(to: name, with: args, yielding: output)
   }
@@ -55,7 +69,21 @@ public final class ConvexClientWithAuth<T: Sendable>: Sendable {
   ///   - name: A value in `module:query_name` format that identifies the backend query.
   ///   - args: Optional arguments to send to the backend query function.
   @discardableResult
-  public func query<Value: Decodable>(_ name: String, with args: [String: ConvexValue?]? = nil)
+  public func query<Value: Decodable>(_ name: String)
+    async throws -> Value
+  {
+    try await client.query(name)
+  }
+
+  /// Executes the query with the given `name` and `args` and returns the decoded result.
+  ///
+  /// For queries that return `null`, call this as an optional type such as `String?`.
+  ///
+  /// - Parameters:
+  ///   - name: A value in `module:query_name` format that identifies the backend query.
+  ///   - args: An `Encodable` value whose keyed properties will be sent as backend query arguments.
+  @discardableResult
+  public func query<Value: Decodable, Args: Encodable & Sendable>(_ name: String, with args: Args)
     async throws -> Value
   {
     try await client.query(name, with: args)
@@ -69,7 +97,21 @@ public final class ConvexClientWithAuth<T: Sendable>: Sendable {
   ///   - name: A value in `module:mutation_name` format that identifies the backend mutation.
   ///   - args: Optional arguments to send to the backend mutation function.
   @discardableResult
-  public func mutation<Value: Decodable>(_ name: String, with args: [String: ConvexValue?]? = nil)
+  public func mutation<Value: Decodable>(_ name: String)
+    async throws -> Value
+  {
+    try await client.mutation(name)
+  }
+
+  /// Executes the mutation with the given `name` and `args` and returns the decoded result.
+  ///
+  /// For mutations that return `null`, call this as an optional type such as `String?`.
+  ///
+  /// - Parameters:
+  ///   - name: A value in `module:mutation_name` format that identifies the backend mutation.
+  ///   - args: An `Encodable` value whose keyed properties will be sent as backend mutation arguments.
+  @discardableResult
+  public func mutation<Value: Decodable, Args: Encodable & Sendable>(_ name: String, with args: Args)
     async throws -> Value
   {
     try await client.mutation(name, with: args)
@@ -83,7 +125,21 @@ public final class ConvexClientWithAuth<T: Sendable>: Sendable {
   ///   - name: A value in `module:action_name` format that identifies the backend action.
   ///   - args: Optional arguments to send to the backend action function.
   @discardableResult
-  public func action<Value: Decodable>(_ name: String, with args: [String: ConvexValue?]? = nil)
+  public func action<Value: Decodable>(_ name: String)
+    async throws -> Value
+  {
+    try await client.action(name)
+  }
+
+  /// Executes the action with the given `name` and `args` and returns the decoded result.
+  ///
+  /// For actions that return `null`, call this as an optional type such as `String?`.
+  ///
+  /// - Parameters:
+  ///   - name: A value in `module:action_name` format that identifies the backend action.
+  ///   - args: An `Encodable` value whose keyed properties will be sent as backend action arguments.
+  @discardableResult
+  public func action<Value: Decodable, Args: Encodable & Sendable>(_ name: String, with args: Args)
     async throws -> Value
   {
     try await client.action(name, with: args)
